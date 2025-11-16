@@ -1,0 +1,12 @@
+{
+  "name": "fraud_detector",
+  "version": "0.1.0",
+  "private": true,
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "dependencies": {
+    "kafkajs": "^2.2.4"
+  }
+}

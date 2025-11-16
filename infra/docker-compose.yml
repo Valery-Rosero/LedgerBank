@@ -1,0 +1,162 @@
+name: ledger-bank
+
+services:
+  smtp:
+    image: mailhog/mailhog:latest
+    container_name: ledger_smtp
+    restart: unless-stopped
+    ports:
+      - "1025:1025"  # SMTP
+      - "8025:8025"  # Web UI
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.1
+    container_name: ledger_zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.1
+    container_name: ledger_kafka
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+    ports:
+      - "9092:9092"
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: ledger_rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    healthcheck:
+      test: ["CMD-SHELL", "rabbitmq-diagnostics -q ping || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+  transaction_api:
+    build: ../services/transaction_api
+    container_name: ledger_transaction_api
+    restart: unless-stopped
+    env_file:
+      - ./env/transaction_api.env
+    ports:
+      - "3000:3000"
+    depends_on:
+      - rabbitmq
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"const http=require('http');const port=process.env.PORT||3000;http.get(`http://localhost:$${port}/health`,res=>process.exit(res.statusCode===200?0:1)).on('error',()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+  transaction_processor:
+    build: ../services/transaction_processor
+    container_name: ledger_transaction_processor
+    restart: unless-stopped
+    env_file:
+      - ./env/transaction_processor.env
+    depends_on:
+      - transaction_api
+      - kafka
+      - rabbitmq
+
+  fraud_detector:
+    build: ../services/fraud_detector
+    container_name: ledger_fraud_detector
+    restart: unless-stopped
+    env_file:
+      - ./env/fraud_detector.env
+    depends_on:
+      - transaction_processor
+      - kafka
+
+  dashboard_aggregator:
+    build: ../services/dashboard_aggregator
+    container_name: ledger_dashboard_aggregator
+    restart: unless-stopped
+    env_file:
+      - ./env/dashboard_aggregator.env
+    ports:
+      - "4000:4000"
+      - "8081:8081"
+    depends_on:
+      - transaction_api
+      - kafka
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"const http=require('http');const port=process.env.PORT||4000;http.get(`http://localhost:$${port}/health`,res=>process.exit(res.statusCode===200?0:1)).on('error',()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+  notification_router:
+    build: ../services/notification_router
+    container_name: ledger_notification_router
+    restart: unless-stopped
+    env_file:
+      - ./env/notification_router.env
+    ports:
+      - "5000:5000"
+    depends_on:
+      - transaction_api
+      - kafka
+      - rabbitmq
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"const http=require('http');const port=process.env.PORT||5000;http.get(`http://localhost:$${port}/health`,res=>process.exit(res.statusCode===200?0:1)).on('error',()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+  ad_generator:
+    build: ../services/ad_generator
+    container_name: ledger_ad_generator
+    restart: unless-stopped
+    env_file:
+      - ./env/ad_generator.env
+    depends_on:
+      - dashboard_aggregator
+      - rabbitmq
+
+  email_worker:
+    build: ../services/email_worker
+    container_name: ledger_email_worker
+    restart: unless-stopped
+    env_file:
+      - ./env/email_worker.env
+    depends_on:
+      - notification_router
+      - rabbitmq
+      - smtp
+
+  dashboard_client:
+    build: ../services/dashboard_client
+    container_name: ledger_dashboard_client
+    restart: unless-stopped
+    env_file:
+      - ./env/dashboard_client.env
+    ports:
+      - "8080:8080"
+    depends_on:
+      - dashboard_aggregator
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"const http=require('http');const port=process.env.PORT||8080;http.get(`http://localhost:$${port}/health`,res=>process.exit(res.statusCode===200?0:1)).on('error',()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s

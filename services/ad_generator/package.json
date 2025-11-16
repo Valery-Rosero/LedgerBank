@@ -1,0 +1,12 @@
+{
+  "name": "ad_generator",
+  "version": "0.1.0",
+  "private": true,
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "dependencies": {
+    "amqplib": "^0.10.3"
+  }
+}

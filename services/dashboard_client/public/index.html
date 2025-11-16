@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Ledger Bank - Dashboard</title>
+    <style>
+      body { font-family: system-ui, Arial, sans-serif; margin: 24px; }
+      h1 { margin: 0 0 12px; }
+      #status { margin-bottom: 16px; }
+      table { border-collapse: collapse; width: 100%; }
+      th, td { border: 1px solid #ddd; padding: 8px; }
+      tr:nth-child(even){ background-color: #f9f9f9; }
+      tr.suspicious { background-color: #ffe5e5; }
+      .pill { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 12px; }
+      .ok { background: #e6ffed; color: #0a6b2e; }
+      .fail { background: #ffecec; color: #9b1c1c; }
+      .alert { background: #ffefc6; color: #8a5a00; }
+    </style>
+  </head>
+  <body>
+    <h1>Ledger de Transacciones</h1>
+    <div id="status">Conectando a WebSocket...</div>
+    <table>
+      <thead>
+        <tr>
+          <th>Tx ID</th>
+          <th>Desde</th>
+          <th>Hacia</th>
+          <th>Monto</th>
+          <th>Estado</th>
+          <th>Sospechoso</th>
+          <th>Procesado</th>
+        </tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+
+    <script>
+      const rows = document.getElementById('rows');
+      const status = document.getElementById('status');
+      const ws = new WebSocket('ws://localhost:8081');
+      const txs = new Map();
+      const alerts = new Set();
+
+      function render() {
+        rows.innerHTML = '';
+        const list = Array.from(txs.values()).sort((a,b)=> (a.processed_at||'').localeCompare(b.processed_at||''));
+        for (const tx of list) {
+          const suspicious = alerts.has(tx.tx_id) || tx.suspicious;
+          const tr = document.createElement('tr');
+          if (suspicious) tr.classList.add('suspicious');
+          tr.innerHTML = `
+            <td>${tx.tx_id}</td>
+            <td>${tx.from_user}</td>
+            <td>${tx.to_user}</td>
+            <td>$${tx.amount}</td>
+            <td><span class="pill ${tx.status === 'COMPLETED' ? 'ok' : 'fail'}">${tx.status}</span></td>
+            <td>${suspicious ? '<span class="pill alert">SOSPECHOSO</span>' : '-'}</td>
+            <td>${tx.processed_at || '-'}</td>
+          `;
+          rows.appendChild(tr);
+        }
+      }
+
+      ws.addEventListener('open', () => status.textContent = 'Conectado');
+      ws.addEventListener('close', () => status.textContent = 'Desconectado');
+      ws.addEventListener('message', (evt) => {
+        try {
+          const msg = JSON.parse(evt.data);
+          if (msg.type === 'snapshot') {
+            rows.innerHTML = '';
+            txs.clear(); alerts.clear();
+            for (const tx of msg.data) { txs.set(tx.tx_id, tx); if (tx.suspicious) alerts.add(tx.tx_id); }
+            render();
+          } else if (msg.type === 'transaction') {
+            txs.set(msg.data.tx_id, msg.data);
+            render();
+          } else if (msg.type === 'alert') {
+            alerts.add(msg.data.tx_id);
+            render();
+          }
+        } catch (e) { console.error('WS parse error', e); }
+      });
+    </script>
+  </body>
+</html>

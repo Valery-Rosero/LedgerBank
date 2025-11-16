@@ -1,0 +1,10 @@
+# Ignora todo por defecto y permite solo lo necesario para el build
+*
+!package.json
+!package-lock.json
+!src/**
+!.env.example
+node_modules/
+.git/
+.env
+.env.*
